@@ -1,3 +1,4 @@
+import os
 import threading
 from datetime import datetime
 
@@ -267,4 +268,6 @@ def main(page: ft.Page):
     )
 
 
-ft.app(target=main)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8502))
+    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=port, host="0.0.0.0")
