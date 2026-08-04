@@ -1,14 +1,51 @@
+import socket
 import speedtest
+import time
 
 
 def selecionar_melhor_servidor(tester):
     try:
-        servidores_br = tester.get_servers().get("BR", [])
+        servidores = tester.get_servers()
+        servidores_br = [
+            s for grupo in servidores.values()
+            for s in grupo
+            if s.get("cc") == "BR" or
+            s.get("country", "").lower() == "brazil"
+        ]
+        servidores_br.sort(key=lambda s: float(s.get("d") or 0))
+        servidores_br = servidores_br[:20]
     except Exception:
         servidores_br = []
     if servidores_br:
         return tester.get_best_server(servidores_br)
     return tester.get_best_server()
+
+
+def medir_ping(servidor=None, tentativas=2):
+    alvos = []
+    if servidor:
+        host = (servidor.get("host") or "").split(":")[0]
+        if host:
+            alvos.append((host, 443))
+            alvos.append((host, 80))
+    alvos += [("1.1.1.1", 443), ("1.1.1.1", 53),
+              ("8.8.8.8", 443), ("8.8.8.8", 53)]
+    amostras = []
+    for host, porta in alvos:
+        for _ in range(tentativas):
+            inicio = time.perf_counter()
+            try:
+                with socket.create_connection((host, porta), timeout=1.5):
+                    amostras.append(
+                        (time.perf_counter() - inicio) * 1000.0
+                    )
+            except OSError:
+                pass
+            if len(amostras) >= 5:
+                return round(min(amostras), 2)
+    if not amostras:
+        return None
+    return round(min(amostras), 2)
 
 
 def tratar_ping(ping, servidor=None):
@@ -51,8 +88,10 @@ def testar_velocidade():
     print("Buscando melhor servidor...")
     melhor_servidor = selecionar_melhor_servidor(tester)
 
-    print("Testando ping...")
-    ping_ms = tratar_ping(tester.results.ping, melhor_servidor)
+    print("Medindo ping...")
+    ping_ms = medir_ping(melhor_servidor)
+    if ping_ms is None:
+        ping_ms = tratar_ping(tester.results.ping, melhor_servidor)
 
     print("Testando download...")
     tester.download()

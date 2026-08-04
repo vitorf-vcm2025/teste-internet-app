@@ -1,7 +1,9 @@
 import json
 import os
+import socket
 import sys
 import threading
+import time
 from datetime import datetime
 
 if sys.stdout is None:
@@ -232,9 +234,12 @@ class SpeedTestApp(ctk.CTk):
             melhor_servidor = self._selecionar_servidor(tester)
 
             self.after(0, lambda: self.status_label.configure(
-                text="Testando ping...", text_color="#f39c12"))
+                text="Medindo ping...", text_color="#f39c12"))
 
-            ping_ms = self._tratar_ping(tester.results.ping, melhor_servidor)
+            ping_ms = self._medir_ping(melhor_servidor)
+            if ping_ms is None:
+                ping_ms = self._tratar_ping(
+                    tester.results.ping, melhor_servidor)
 
             self.after(0, lambda: self.status_label.configure(
                 text="Medindo Download...", text_color="#f39c12"))
@@ -303,12 +308,48 @@ class SpeedTestApp(ctk.CTk):
     @staticmethod
     def _selecionar_servidor(tester):
         try:
-            servidores_br = tester.get_servers().get("BR", [])
+            servidores = tester.get_servers()
+            servidores_br = [
+                s for grupo in servidores.values()
+                for s in grupo
+                if s.get("cc") == "BR" or
+                s.get("country", "").lower() == "brazil"
+            ]
+            servidores_br.sort(key=lambda s: float(s.get("d") or 0))
+            servidores_br = servidores_br[:20]
         except Exception:
             servidores_br = []
         if servidores_br:
             return tester.get_best_server(servidores_br)
         return tester.get_best_server()
+
+    @staticmethod
+    def _medir_ping(servidor=None, tentativas=2):
+        alvos = []
+        if servidor:
+            host = (servidor.get("host") or "").split(":")[0]
+            if host:
+                alvos.append((host, 443))
+                alvos.append((host, 80))
+        alvos += [("1.1.1.1", 443), ("1.1.1.1", 53),
+                  ("8.8.8.8", 443), ("8.8.8.8", 53)]
+        amostras = []
+        for host, porta in alvos:
+            for _ in range(tentativas):
+                inicio = time.perf_counter()
+                try:
+                    with socket.create_connection((host, porta),
+                                                  timeout=1.5):
+                        amostras.append(
+                            (time.perf_counter() - inicio) * 1000.0
+                        )
+                except OSError:
+                    pass
+                if len(amostras) >= 5:
+                    return round(min(amostras), 2)
+        if not amostras:
+            return None
+        return round(min(amostras), 2)
 
     @staticmethod
     def _tratar_ping(ping, servidor=None):
