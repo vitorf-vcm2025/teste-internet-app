@@ -227,9 +227,14 @@ class SpeedTestApp(ctk.CTk):
             tester = speedtest.Speedtest()
 
             self.after(0, lambda: self.status_label.configure(
+                text="Buscando melhor servidor...", text_color="#f39c12"))
+
+            melhor_servidor = self._selecionar_servidor(tester)
+
+            self.after(0, lambda: self.status_label.configure(
                 text="Testando ping...", text_color="#f39c12"))
 
-            tester.get_best_server()
+            ping_ms = self._tratar_ping(tester.results.ping, melhor_servidor)
 
             self.after(0, lambda: self.status_label.configure(
                 text="Medindo Download...", text_color="#f39c12"))
@@ -241,7 +246,6 @@ class SpeedTestApp(ctk.CTk):
 
             download_mbps = tester.results.download / 1_000_000
             upload_mbps = tester.results.upload / 1_000_000
-            ping_ms = tester.results.ping
 
             qual = self._classificar_qualidade(download_mbps, ping_ms)
 
@@ -249,7 +253,7 @@ class SpeedTestApp(ctk.CTk):
                 "horario": datetime.now().strftime("%H:%M:%S"),
                 "download": f"{download_mbps:.2f}",
                 "upload": f"{upload_mbps:.2f}",
-                "ping": f"{ping_ms:.1f}",
+                "ping": f"{ping_ms:.2f}",
                 "download_bps": tester.results.download,
                 "upload_bps": tester.results.upload,
                 "ping_ms": ping_ms,
@@ -297,11 +301,46 @@ class SpeedTestApp(ctk.CTk):
             self.after(0, self._finalizar)
 
     @staticmethod
+    def _selecionar_servidor(tester):
+        try:
+            servidores_br = tester.get_servers().get("BR", [])
+        except Exception:
+            servidores_br = []
+        if servidores_br:
+            return tester.get_best_server(servidores_br)
+        return tester.get_best_server()
+
+    @staticmethod
+    def _tratar_ping(ping, servidor=None):
+        if ping is None and servidor:
+            ping = servidor.get("latency")
+        if ping is None:
+            return 0.0
+        if isinstance(ping, (list, tuple, dict, set)):
+            try:
+                ping = next(iter(ping))
+            except (TypeError, StopIteration):
+                return 0.0
+        try:
+            ping = float(ping)
+        except (TypeError, ValueError):
+            return 0.0
+        if ping < 0:
+            return 0.0
+        if ping < 1:
+            ping *= 1000.0
+        if ping >= 1_000_000:
+            return 0.0
+        return round(ping, 2)
+
+    @staticmethod
     def _classificar_qualidade(download_mbps, ping_ms):
-        if download_mbps >= 50 and ping_ms < 30:
+        if download_mbps >= 100 and ping_ms < 50:
             return "Excelente", "#2ecc71"
-        if download_mbps >= 20 and ping_ms < 60:
+        if download_mbps >= 50 and ping_ms < 80:
             return "Boa", "#f39c12"
+        if download_mbps >= 20 and ping_ms < 150:
+            return "Regular", "#3498db"
         return "Lenta", "#e74c3c"
 
     def _exibir_info(self, info, dados):

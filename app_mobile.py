@@ -7,11 +7,46 @@ import speedtest
 
 
 def classificar_qualidade(download_mbps, ping_ms):
-    if download_mbps >= 50 and ping_ms < 30:
+    if download_mbps >= 100 and ping_ms < 50:
         return "Excelente", ft.Colors.GREEN
-    if download_mbps >= 20 and ping_ms < 60:
+    if download_mbps >= 50 and ping_ms < 80:
         return "Boa", ft.Colors.AMBER
+    if download_mbps >= 20 and ping_ms < 150:
+        return "Regular", ft.Colors.BLUE
     return "Ruim", ft.Colors.RED
+
+
+def selecionar_melhor_servidor(tester):
+    try:
+        servidores_br = tester.get_servers().get("BR", [])
+    except Exception:
+        servidores_br = []
+    if servidores_br:
+        return tester.get_best_server(servidores_br)
+    return tester.get_best_server()
+
+
+def tratar_ping(ping, servidor=None):
+    if ping is None and servidor:
+        ping = servidor.get("latency")
+    if ping is None:
+        return 0.0
+    if isinstance(ping, (list, tuple, dict, set)):
+        try:
+            ping = next(iter(ping))
+        except (TypeError, StopIteration):
+            return 0.0
+    try:
+        ping = float(ping)
+    except (TypeError, ValueError):
+        return 0.0
+    if ping < 0:
+        return 0.0
+    if ping < 1:
+        ping *= 1000.0
+    if ping >= 1_000_000:
+        return 0.0
+    return round(ping, 2)
 
 
 def main(page: ft.Page):
@@ -128,9 +163,14 @@ def main(page: ft.Page):
 
                 tester = speedtest.Speedtest()
 
+                status_texto.value = "Buscando melhor servidor..."
+                status_texto.color = ft.Colors.AMBER
+                page.update()
+                melhor_servidor = selecionar_melhor_servidor(tester)
+
                 status_texto.value = "Testando ping..."
                 page.update()
-                tester.get_best_server()
+                p_ms = tratar_ping(tester.results.ping, melhor_servidor)
 
                 status_texto.value = "Medindo Download..."
                 page.update()
@@ -142,20 +182,19 @@ def main(page: ft.Page):
 
                 d_mbps = tester.results.download / 1_000_000
                 u_mbps = tester.results.upload / 1_000_000
-                p_ms = tester.results.ping
                 qual, cor_qual = classificar_qualidade(d_mbps, p_ms)
 
                 dados = {
                     "horario": datetime.now().strftime("%H:%M:%S"),
                     "download": f"{d_mbps:.2f}",
                     "upload": f"{u_mbps:.2f}",
-                    "ping": f"{p_ms:.1f}",
+                    "ping": f"{p_ms:.2f}",
                 }
                 historico.append(dados)
 
                 download_valor.value = f"{d_mbps:.2f}"
                 upload_valor.value = f"{u_mbps:.2f}"
-                ping_valor.value = f"{p_ms:.1f}"
+                ping_valor.value = f"{p_ms:.2f}"
                 qualidade_texto.value = f"Qualidade da Conexão: {qual}"
                 qualidade_texto.color = cor_qual
                 status_texto.value = "Teste concluído!"
