@@ -18,21 +18,39 @@ def classificar_qualidade(download_mbps, ping_ms):
     return "Ruim", ft.Colors.RED
 
 
-def selecionar_melhor_servidor(tester):
+def obter_servidor_brasil(tester, apenas_cc_br=False):
     try:
-        servidores = tester.get_servers()
-        servidores_br = [
-            s for grupo in servidores.values()
-            for s in grupo
-            if s.get("cc") == "BR" or
-            s.get("country", "").lower() == "brazil"
-        ]
-        servidores_br.sort(key=lambda s: float(s.get("d") or 0))
-        servidores_br = servidores_br[:20]
-    except Exception:
+        servidores = tester.get_servers([])
         servidores_br = []
-    if servidores_br:
-        return tester.get_best_server(servidores_br)
+        for lista in servidores.values():
+            for s in lista:
+                cc = s.get("cc", "").upper()
+                if apenas_cc_br:
+                    if cc == "BR":
+                        servidores_br.append(s)
+                    continue
+                pais = s.get("country", "").lower()
+                if ("brazil" in pais or "brasil" in pais
+                        or cc == "BR"):
+                    servidores_br.append(s)
+        if servidores_br:
+            servidores_br.sort(key=lambda s: float(s.get("d") or 0))
+            servidores_br = servidores_br[:30]
+            try:
+                return tester.get_best_server(servidores_br)
+            except Exception:
+                for s in servidores_br[:10]:
+                    latencia = medir_ping(s)
+                    if latencia is not None:
+                        s = dict(s)
+                        s["latency"] = latencia
+                        tester._best.update(s)
+                        tester.results.server = s
+                        tester.results.ping = latencia
+                        return s
+                raise
+    except Exception:
+        pass
     return tester.get_best_server()
 
 
@@ -203,7 +221,8 @@ def main(page: ft.Page):
                 status_texto.value = "Buscando melhor servidor..."
                 status_texto.color = ft.Colors.AMBER
                 page.update()
-                melhor_servidor = selecionar_melhor_servidor(tester)
+                melhor_servidor = obter_servidor_brasil(
+                    tester, apenas_cc_br=True)
 
                 status_texto.value = "Medindo ping..."
                 page.update()
