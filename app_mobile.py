@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import socket
 import threading
@@ -36,40 +37,61 @@ def classificar_qualidade(download_mbps, ping_ms):
     return "Ruim", ft.Colors.RED
 
 
-def obter_servidor_brasil(tester, apenas_cc_br=False):
+def _distancia_km(origem, destino):
+    lat1, lon1 = origem
+    lat2, lon2 = destino
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) *
+         math.cos(math.radians(lat2)) *
+         math.sin(dlon / 2) ** 2)
+    return 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _eh_sao_paulo(s):
+    texto = f"{s.get('name', '')} {s.get('sponsor', '')}".lower()
+    return ("são paulo" in texto or "sao paulo" in texto
+            or "paulista" in texto or "sp -" in texto or "sp," in texto)
+
+
+def obter_servidor_brasil(tester):
     try:
         servidores = tester.get_servers([])
-        servidores_br = []
-        for lista in servidores.values():
-            for s in lista:
-                cc = s.get("cc", "").upper()
-                if apenas_cc_br:
-                    if cc == "BR":
-                        servidores_br.append(s)
-                    continue
-                pais = s.get("country", "").lower()
-                if ("brazil" in pais or "brasil" in pais
-                        or cc == "BR"):
-                    servidores_br.append(s)
-        if servidores_br:
-            servidores_br.sort(key=lambda s: float(s.get("d") or 0))
-            servidores_br = servidores_br[:30]
+        servidores_br = [
+            s for lista in servidores.values()
+            for s in lista
+            if s.get("cc", "").upper() == "BR"
+            or "brazil" in s.get("country", "").lower()
+        ]
+        if not servidores_br:
+            return tester.get_best_server()
+
+        sp = (-23.5505, -46.6333)
+        for s in servidores_br:
             try:
-                return tester.get_best_server(servidores_br)
-            except Exception:
-                for s in servidores_br[:10]:
-                    latencia = medir_ping(s)
-                    if latencia is not None:
-                        s = dict(s)
-                        s["latency"] = latencia
-                        tester._best.update(s)
-                        tester.results.server = s
-                        tester.results.ping = latencia
-                        return s
-                raise
+                s["_dist_sp"] = _distancia_km(
+                    sp, (float(s.get("lat")), float(s.get("lon")))
+                )
+            except (TypeError, ValueError):
+                s["_dist_sp"] = float("inf")
+
+        servidores_br.sort(
+            key=lambda s: (0 if _eh_sao_paulo(s) else 1,
+                           s.get("_dist_sp", float("inf")))
+        )
+
+        melhor = dict(servidores_br[0])
+        latencia = medir_ping(melhor)
+        melhor["latency"] = latencia if latencia is not None else 0.0
+
+        tester._best.clear()
+        tester._best.update(melhor)
+        tester.results.server = melhor
+        tester.results.ping = melhor["latency"]
+        return melhor
     except Exception:
-        pass
-    return tester.get_best_server()
+        return tester.get_best_server()
 
 
 def medir_ping(servidor=None, tentativas=2):
