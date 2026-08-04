@@ -1,11 +1,29 @@
+import json
 import os
 import socket
 import threading
 import time
+import urllib.request
 from datetime import datetime
 
 import flet as ft
 import speedtest
+
+
+def obter_isp_do_ip(ip):
+    if not ip or ip in ("N/A", "None"):
+        return ""
+    try:
+        url = f"https://ipwho.is/{ip}"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+        conexao = dados.get("connection") or {}
+        return conexao.get("isp") or conexao.get("org") or ""
+    except Exception:
+        return ""
 
 
 def classificar_qualidade(download_mbps, ping_ms):
@@ -221,8 +239,7 @@ def main(page: ft.Page):
                 status_texto.value = "Buscando melhor servidor..."
                 status_texto.color = ft.Colors.AMBER
                 page.update()
-                melhor_servidor = obter_servidor_brasil(
-                    tester, apenas_cc_br=True)
+                melhor_servidor = obter_servidor_brasil(tester)
 
                 status_texto.value = "Medindo ping..."
                 page.update()
@@ -258,8 +275,15 @@ def main(page: ft.Page):
                 status_texto.value = "Teste concluído!"
                 status_texto.color = ft.Colors.GREEN
 
-                info_isp.value = f"ISP: {tester.results.client.get('isp', 'N/A')}"
-                info_ip.value = f"IP: {tester.results.client.get('ip', 'N/A')}"
+                ip_cliente = getattr(page, "client_ip", None) or ""
+                isp_cliente = obter_isp_do_ip(ip_cliente) if ip_cliente else ""
+                if not isp_cliente:
+                    isp_cliente = tester.results.client.get("isp", "N/A")
+                if not ip_cliente:
+                    ip_cliente = tester.results.client.get("ip", "N/A")
+
+                info_isp.value = f"ISP: {isp_cliente}"
+                info_ip.value = f"IP: {ip_cliente}"
                 info_servidor.value = (
                     f"Servidor: {tester.results.server.get('sponsor', 'N/A')} "
                     f"({tester.results.server.get('name', 'N/A')})"
@@ -367,4 +391,29 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8502))
-    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=port, host="0.0.0.0")
+
+    try:
+        import uvicorn
+        import flet_web.fastapi
+
+        app_web = flet_web.fastapi.app(
+            main,
+            before_main=None,
+            proxy_path=None,
+            assets_dir=None,
+            web_renderer=ft.WebRenderer.AUTO,
+            route_url_strategy=ft.RouteUrlStrategy.PATH,
+            no_cdn=False,
+        )
+        config = uvicorn.Config(
+            app_web,
+            host="0.0.0.0",
+            port=port,
+            proxy_headers=True,
+            forwarded_allow_ips="*",
+            ws="websockets-sansio",
+        )
+        uvicorn.Server(config).run()
+    except Exception:
+        ft.app(target=main, view=ft.AppView.WEB_BROWSER,
+               port=port, host="0.0.0.0")
